@@ -17,8 +17,8 @@ ESCALA_CHANNEL_ID = int(os.getenv("ESCALA_CHANNEL_ID", 0))
 LOGO_URL = "https://cdn.discordapp.com/attachments/1195135499455697068/1303084925179924591/logo_pmc.png?ex=680be868&is=680a96e8&hm=8dc83d13a910abc5516cf3de5dbaed3f8aee53ac3217fab7ac2676ea3f64a8a8&"
 ALTO_COMANDO_ROLE_ID = int(os.getenv("ALTO_COMANDO_ROLE_ID", "0"))
 
-SHEETS_JSON = 'metropolerp-455022-91d42624740f.json'
-SHEETS_NOME = 'Escala de Patrulha'
+SHEETS_JSON = 'bot-recepcao-5557dcc81a34.json'
+SHEETS_NOME = 'Controle-Recepcao'
 
 # ========== ESCALA DE PRESENÇA ==========
 ESCALA_MAX = 3  # Limite de pessoas na escala
@@ -27,12 +27,21 @@ escala_msg_id = None  # Para manter a mensagem fixa
 
 # Função para registrar no Google Sheets (apenas na saída)
 async def registrar_no_sheets_saida(nome, horario_entrada, horario_saida, tempo_total):
+    # Divide o apelido do Discord no formato "Nome | Passaporte"
+    if '|' in nome:
+        nome_split = nome.split('|', 1)
+        nome_formatado = nome_split[0].strip()
+        passaporte = nome_split[1].strip()
+    else:
+        nome_formatado = nome.strip()
+        passaporte = ''
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     creds = ServiceAccountCredentials.from_json_keyfile_name(SHEETS_JSON, scope)
     client = gspread.authorize(creds)
     sheet = client.open(SHEETS_NOME).sheet1  # Usa a primeira aba
     sheet.append_row([
-        nome,
+        nome_formatado,
+        passaporte,
         horario_entrada,
         horario_saida,
         tempo_total
@@ -95,6 +104,10 @@ class SairEscalaButton(Button):
             if not participante:
                 await interaction.followup.send("Você não está na escala.", ephemeral=True)
                 return
+            # Verifica se o botão foi clicado pelo próprio participante
+            if interaction.user.id != participante['id']:
+                await interaction.followup.send("Você só pode sair da escala por sua própria conta.", ephemeral=True)
+                return
             agora = datetime.now()
             tempo_total = agora - participante['entrada']
             escala_participantes.remove(participante)
@@ -119,6 +132,7 @@ class SairEscalaButton(Button):
             await atualizar_escala_embed(interaction)
         except Exception as e:
             print(f"Erro no callback SairEscalaButton: {e}")
+            import traceback; traceback.print_exc()
             try:
                 if not interaction.response.is_done():
                     await interaction.response.send_message("Ocorreu um erro ao processar sua saída da escala.", ephemeral=True)
@@ -147,13 +161,9 @@ async def atualizar_escala_embed(interaction):
     else:
         embed.description = "📭 Ninguém está na escala no momento.\nClique em **Entrar na Escala** para ser o primeiro a assumir!"
     view = View(timeout=None)
-    # Adiciona botão apenas na mensagem dinâmica
-    if len(escala_participantes) < ESCALA_MAX:
-        view.add_item(EntrarEscalaButton())
-    for p in escala_participantes:
-        if p['id'] == interaction.user.id:
-            view.add_item(SairEscalaButton())
-            break
+    # Sempre mostra ambos os botões habilitados para todos
+    view.add_item(EntrarEscalaButton())
+    view.add_item(SairEscalaButton())
     # Edita ou envia
     if escala_msg_id:
         try:
